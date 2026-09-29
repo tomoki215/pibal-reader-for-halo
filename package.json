@@ -1,0 +1,9 @@
+{
+  "name": "pibal-reader-for-halo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/integrations/halo/*.js"
+  }
+}
