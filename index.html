@@ -337,6 +337,21 @@
     transition: border-color 0.15s;
   }
   .btn-export:hover { border-color: var(--accent); }
+  .btn-halo {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .btn-export:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    border-color: var(--border);
+  }
+  .integration-help {
+    margin: -6px 4px 16px;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.6;
+  }
 
   /* Permission overlay */
   .perm-overlay {
@@ -515,6 +530,12 @@
     <button class="btn-export" onclick="exportCSV()">📄 CSV出力</button>
     <button class="btn-export" onclick="captureChart()">📸 チャート保存</button>
   </div>
+  <div class="export-section">
+    <button class="btn-export btn-halo" id="sendToHalo" type="button" disabled>↗ HALOへ反映</button>
+  </div>
+  <p class="integration-help" id="haloHelp">
+    HALOへの反映は、HALOの風データ編集画面から開いた場合に利用できます。単独利用時はCSVを出力してください。
+  </p>
 </div>
 
 <script>
@@ -732,18 +753,20 @@ function capturePoint() {
 
   // Wind direction (where wind comes FROM - meteorological convention)
   // Balloon moves downwind, so wind comes from opposite direction
-  let windDir = Math.atan2(dx, dy) * 180 / Math.PI;
-  // The balloon drifts in the wind direction, but heading already points to balloon
-  // So the "wind from" direction is heading (approximately)
+  const driftDirection = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+  const windDirection = (driftDirection + 180) % 360;
 
   records.push({
     time: sampleCount,
     altitude,
+    lowerAltitude: altLow,
+    upperAltitude: altHigh,
     altLabel,
     heading: Math.round(heading * 10) / 10,
     elevation: Math.round(elevation * 10) / 10,
     windSpeed: Math.round(windSpeedKt * 10) / 10,
     windSpeedMs: Math.round(windSpeedMs * 10) / 10,
+    windDirection: Math.round(windDirection * 10) / 10,
     dx, dy,
     balloonX, balloonY
   });
@@ -980,6 +1003,26 @@ function captureChart() {
   a.click();
 }
 
+// HALO integration reads a copy so it cannot mutate observation state.
+window.getHaloMeasurement = function() {
+  const observedAt = new Date();
+  const observationTime = document.getElementById('obsTime').value;
+  if (observationTime) {
+    const [hours, minutes] = observationTime.split(':').map(Number);
+    observedAt.setHours(hours, minutes, 0, 0);
+  }
+
+  return {
+    observedAt: observedAt.toISOString(),
+    layers: records.map(record => ({
+      lowerAltitude: record.lowerAltitude,
+      upperAltitude: record.upperAltitude,
+      direction: record.windDirection,
+      speed: record.windSpeedMs
+    }))
+  };
+};
+
 // ===== Init =====
 window.addEventListener('DOMContentLoaded', () => {
   drawChart();
@@ -989,6 +1032,27 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('obsTime').value =
     now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
 });
+</script>
+<script src="./halo-config.js"></script>
+<script type="module">
+  import { createHaloIntegration } from './src/integrations/halo/halo-post-message.js';
+
+  const button = document.getElementById('sendToHalo');
+  const help = document.getElementById('haloHelp');
+  const integration = createHaloIntegration({
+    window,
+    allowedOrigins: window.PIBAL_HALO_ALLOWED_ORIGINS || [],
+    getMeasurement: window.getHaloMeasurement,
+    onStateChange(state) {
+      button.disabled = !state.canSend;
+      if (state.message) help.textContent = state.message;
+      if (state.status) setStatus(state.status.text, state.status.type);
+    }
+  });
+
+  button.addEventListener('click', () => integration.sendMeasurement());
+  integration.start();
+  window.addEventListener('pagehide', () => integration.destroy(), { once: true });
 </script>
 </body>
 </html>
