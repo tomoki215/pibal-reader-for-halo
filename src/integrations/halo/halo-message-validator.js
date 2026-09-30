@@ -16,6 +16,15 @@ export function requestedHaloOrigin(location, allowedOrigins) {
   return value && allowedOrigins.has(value) ? value : null;
 }
 
+export function embeddingOrigin(document) {
+  try {
+    const url = new URL(document.referrer);
+    return ['https:', 'http:'].includes(url.protocol) ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isHaloMessage(data) {
   return data !== null && typeof data === 'object' && data.source === 'halo' &&
     data.protocolVersion === PROTOCOL_VERSION &&

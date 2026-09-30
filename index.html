@@ -1040,8 +1040,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const button = document.getElementById('sendToHalo');
   const help = document.getElementById('haloHelp');
   const integration = createHaloIntegration({
-    window,
+    window, document,
     allowedOrigins: window.PIBAL_HALO_ALLOWED_ORIGINS || [],
+    trustEmbeddingOrigin: window.PIBAL_HALO_TRUST_EMBEDDING_ORIGIN === true,
     getMeasurement: window.getHaloMeasurement,
     onStateChange(state) {
       button.disabled = !state.canSend;

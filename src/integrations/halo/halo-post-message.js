@@ -2,13 +2,14 @@ import {
   capabilitiesMessage, HALO_READY, MEASUREMENT_ACCEPTED, MEASUREMENT_COMPLETED,
   MEASUREMENT_REJECTED, PROTOCOL_VERSION
 } from './halo-message-types.js';
-import { isHaloMessage, normalizeAllowedOrigins, requestedHaloOrigin } from './halo-message-validator.js';
+import { embeddingOrigin, isHaloMessage, normalizeAllowedOrigins, requestedHaloOrigin } from './halo-message-validator.js';
 
 const standaloneMessage = 'HALOへの反映は、HALOの風データ編集画面から開いた場合に利用できます。単独利用時はCSVを出力してください。';
 
-export function createHaloIntegration({ window, allowedOrigins, getMeasurement, onStateChange = () => {} }) {
+export function createHaloIntegration({ window, document, allowedOrigins, trustEmbeddingOrigin = false, getMeasurement, onStateChange = () => {} }) {
   const origins = normalizeAllowedOrigins(allowedOrigins);
-  const haloOrigin = requestedHaloOrigin(window.location, origins);
+  const haloOrigin = requestedHaloOrigin(window.location, origins) ||
+    (trustEmbeddingOrigin ? embeddingOrigin(document) : null);
   const embedded = window.parent !== window;
   let ready = false;
   let pendingMeasurementId = null;
