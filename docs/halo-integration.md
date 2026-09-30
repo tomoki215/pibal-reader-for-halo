@@ -12,6 +12,41 @@ https://tomoki215.github.io/pibal-reader-for-halo/?haloOrigin=https%3A%2F%2Fhalo
 
 Every deploy must set the corresponding exact origins in `halo-config.js`. Values must be origins only (scheme, host, and optional port), not paths. The production configuration should not contain development origins. The reader rejects an absent/unlisted value, never uses `"*"`, verifies both `event.origin` and `event.source`, and disables transfer when opened outside an iframe.
 
+### Configuration without publishing a HALO origin in the repository
+
+Browser-side configuration cannot be secret: a value delivered in JavaScript can always be inspected by a visitor. Prefer generating or replacing `halo-config.js` in the deployment pipeline so the deployed origin is not committed to the public source repository.
+
+If even the deployed configuration must not contain a HALO origin, an explicitly less-secure mode is available:
+
+```js
+window.PIBAL_HALO_ALLOWED_ORIGINS = [];
+window.PIBAL_HALO_TRUST_EMBEDDING_ORIGIN = true;
+```
+
+This derives the target from the iframe's `document.referrer`, so it never uses `"*"` and still checks both the message origin and parent window. However, it is **not an authorization boundary**: any HTTP(S) site can embed the reader and become the trusted parent. Use it only when that risk is acceptable. A referrer policy that omits the referrer also makes this mode unavailable. The exact-origin allowlist remains the recommended production setting.
+
+#### HALO-side changes for embedder-origin mode
+
+HALO does not need to publish its origin in the iframe URL when this mode is enabled. Embed the reader without the `haloOrigin` query parameter and explicitly send an origin-only referrer so no HALO path or query string is exposed:
+
+```html
+<iframe
+  src="https://tomoki215.github.io/pibal-reader-for-halo/"
+  referrerpolicy="origin"
+  allow="geolocation"
+></iframe>
+```
+
+Do not use `referrerpolicy="no-referrer"`, a `Referrer-Policy: no-referrer` response header, or a sandbox without `allow-same-origin`; the reader would be unable to determine the embedding origin. The origin is still visible to the reader at runtime, but it is not stored in this repository and the `origin` policy does not disclose HALO's path, query, or fragment.
+
+The rest of HALO's integration remains required:
+
+1. Allow the reader origin in HALO's `frame-src` CSP.
+2. After the iframe loads, send `pibal.integration.ready` to the exact reader origin, never `"*"`.
+3. Accept messages only when `event.origin` is the reader origin and `event.source` is the active iframe's `contentWindow`.
+4. Validate the complete measurement payload and reject duplicate `measurementId` values before populating the edit form.
+5. Return the accepted/rejected acknowledgement to the exact reader origin, and require the user to review and save rather than saving automatically.
+
 HALO must allow only the Pages origin in CSP:
 
 ```nginx

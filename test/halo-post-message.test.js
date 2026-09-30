@@ -4,7 +4,8 @@ import { createHaloIntegration } from '../src/integrations/halo/halo-post-messag
 
 const haloOrigin = 'https://halo.example.com';
 
-function fixture({ search = `?haloOrigin=${encodeURIComponent(haloOrigin)}`, embedded = true } = {}) {
+function fixture({ search = `?haloOrigin=${encodeURIComponent(haloOrigin)}`, embedded = true,
+  allowedOrigins = [haloOrigin], trustEmbeddingOrigin = false, referrer = '' } = {}) {
   const listeners = new Map();
   const sent = [];
   const parent = { postMessage: (data, targetOrigin) => sent.push({ data, targetOrigin }) };
@@ -18,7 +19,7 @@ function fixture({ search = `?haloOrigin=${encodeURIComponent(haloOrigin)}`, emb
   if (!embedded) fakeWindow.parent = fakeWindow;
   const states = [];
   const integration = createHaloIntegration({
-    window: fakeWindow, allowedOrigins: [haloOrigin],
+    window: fakeWindow, document: { referrer }, allowedOrigins, trustEmbeddingOrigin,
     getMeasurement: () => ({ observedAt: '2026-09-29T14:30:00+09:00', layers: [{ lowerAltitude: 0, upperAltitude: 100, direction: 90.5, speed: 5.4 }] }),
     onStateChange: state => states.push(state)
   });
@@ -68,4 +69,23 @@ test('messages from another window or origin are ignored and listener is removed
   assert.equal(app.integration.sendMeasurement(), false);
   app.integration.destroy();
   assert.equal(app.listeners.has('message'), false);
+});
+
+test('explicit unrestricted mode derives the exact target from the embedding page', () => {
+  const app = fixture({
+    search: '', allowedOrigins: [], trustEmbeddingOrigin: true,
+    referrer: `${haloOrigin}/wind/edit/42`
+  });
+  app.ready();
+  assert.equal(app.integration.sendMeasurement(), true);
+  assert.equal(app.sent[1].targetOrigin, haloOrigin);
+});
+
+test('unrestricted mode rejects missing and non-HTTP referrers', () => {
+  for (const referrer of ['', 'file:///tmp/halo.html', 'not a URL']) {
+    const app = fixture({ search: '', allowedOrigins: [], trustEmbeddingOrigin: true, referrer });
+    app.ready();
+    assert.equal(app.integration.sendMeasurement(), false);
+    assert.equal(app.sent.length, 0);
+  }
 });
