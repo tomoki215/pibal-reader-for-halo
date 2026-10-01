@@ -49,3 +49,33 @@ test('calm and unavailable layers are omitted rather than fabricated', () => {
   app.fields.set('manElev', { value: '90' });
   assert.deepEqual(app.capture(90).layers, []);
 });
+
+test('transfer feedback is visible beside the button rather than only at the top of a long observation page', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const source = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import[^;]+;/m, '');
+  const button = { disabled: true, addEventListener() {} };
+  const help = { textContent: '' };
+  let updateState;
+  const context = {
+    window: { addEventListener() {} },
+    document: { getElementById: id => id === 'sendToHalo' ? button : help },
+    createHaloIntegration: options => {
+      updateState = options.onStateChange;
+      return { start() {}, destroy() {}, sendMeasurement() {} };
+    },
+    setStatus() {}
+  };
+  vm.runInNewContext(source, context);
+  updateState({ canSend: true, message: '接続済み' });
+  assert.equal(help.textContent, '接続済み');
+  for (const [canSend, type, text] of [
+    [true, 'warn', '送信する観測データがありません。'],
+    [false, 'info', 'HALOへ送信中…'],
+    [true, 'err', 'HALOから応答がありません。'],
+    [true, 'err', '観測結果を送信できませんでした。']
+  ]) {
+    updateState({ canSend, status: { type, text } });
+    assert.equal(button.disabled, !canSend);
+    assert.equal(help.textContent, text);
+  }
+});

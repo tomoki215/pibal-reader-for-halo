@@ -7,7 +7,7 @@ import { createHaloIntegration } from '../src/integrations/halo/halo-post-messag
 const haloOrigin = 'https://halo.example.com';
 
 function fixture({ search = `?haloOrigin=${encodeURIComponent(haloOrigin)}`, embedded = true,
-  allowedOrigins = [haloOrigin], trustEmbeddingOrigin = false, referrer = '', layers } = {}) {
+  allowedOrigins = [haloOrigin], trustEmbeddingOrigin = false, referrer = '', layers, crypto, getMeasurement } = {}) {
   const listeners = new Map();
   const timers = new Map();
   const sent = [];
@@ -15,7 +15,7 @@ function fixture({ search = `?haloOrigin=${encodeURIComponent(haloOrigin)}`, emb
   let uuid = 0;
   const fakeWindow = {
     location: { search }, parent: embedded ? parent : null,
-    crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}` },
+    crypto: crypto ?? { randomUUID: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}` },
     setTimeout: callback => { const id = Symbol(); timers.set(id, callback); return id; },
     clearTimeout: id => timers.delete(id),
     addEventListener: (type, listener) => listeners.set(type, listener),
@@ -25,7 +25,7 @@ function fixture({ search = `?haloOrigin=${encodeURIComponent(haloOrigin)}`, emb
   const states = [];
   const integration = createHaloIntegration({
     window: fakeWindow, document: { referrer }, allowedOrigins, trustEmbeddingOrigin,
-    getMeasurement: () => ({ observedAt: '2026-09-29T14:30:00+09:00', layers: layers ?? [{ lowerAltitude: 0, upperAltitude: 100, direction: 90.5, speed: 5.4 }] }),
+    getMeasurement: getMeasurement ?? (() => ({ observedAt: '2026-09-29T14:30:00+09:00', layers: layers ?? [{ lowerAltitude: 0, upperAltitude: 100, direction: 90.5, speed: 5.4 }] })),
     onStateChange: state => states.push(state)
   });
   integration.start();
@@ -159,4 +159,36 @@ test('an empty observation does not send or enter pending state', () => {
   assert.equal(app.integration.sendMeasurement(), false);
   assert.equal(app.timers.size, 0);
   assert.equal(app.states.at(-1).status.type, 'warn');
+});
+
+
+test('an insecure embedding context without randomUUID sends a secure UUID v4', () => {
+  let sequence = 0;
+  const crypto = { getRandomValues: bytes => { bytes.fill(++sequence); return bytes; } };
+  const app = fixture({ crypto });
+  app.ready();
+  assert.equal(app.integration.sendMeasurement(), true);
+  const firstId = app.sent.at(-1).data.measurementId;
+  assert.match(firstId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  app.acknowledge();
+  assert.equal(app.integration.sendMeasurement(), true);
+  assert.notEqual(app.sent.at(-1).data.measurementId, firstId);
+});
+
+test('unavailable randomness and invalid observations show errors without leaving a pending transfer', () => {
+  for (const options of [
+    { crypto: {} },
+    { getMeasurement: () => { throw new Error('observation failure'); } },
+    { getMeasurement: () => ({ observedAt: 'invalid', layers: [{}] }) }
+  ]) {
+    const app = fixture(options);
+    app.ready();
+    const initialMessages = app.sent.length;
+    assert.equal(app.integration.sendMeasurement(), false);
+    assert.equal(app.sent.length, initialMessages);
+    assert.equal(app.timers.size, 0);
+    assert.equal(app.states.at(-1).canSend, true);
+    assert.equal(app.states.at(-1).status.type, 'err');
+    assert.match(app.states.at(-1).status.text, /送信できませんでした/);
+  }
 });

@@ -1047,7 +1047,10 @@ window.addEventListener('DOMContentLoaded', () => {
     onStateChange(state) {
       button.disabled = !state.canSend;
       if (state.message) help.textContent = state.message;
-      if (state.status) setStatus(state.status.text, state.status.type);
+      if (state.status) {
+        help.textContent = state.status.text;
+        setStatus(state.status.text, state.status.type);
+      }
     }
   });
 
