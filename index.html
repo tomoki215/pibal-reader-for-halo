@@ -424,7 +424,7 @@
   </div>
 
   <!-- Status -->
-  <div id="status" class="status info">センサー未接続</div>
+  <div id="status" role="status" aria-live="polite" class="status info">センサー未接続</div>
 
   <!-- Config -->
   <div class="config">
@@ -533,8 +533,8 @@
   <div class="export-section">
     <button class="btn-export btn-halo" id="sendToHalo" type="button" disabled>↗ HALOへ反映</button>
   </div>
-  <p class="integration-help" id="haloHelp">
-    HALOへの反映は、HALOの風データ編集画面から開いた場合に利用できます。単独利用時はCSVを出力してください。
+  <p class="integration-help" id="haloHelp" role="status" aria-live="polite">
+    HALOへの反映は、HALOの風情報画面の「追加」から開いた場合に利用できます。単独利用時はCSVを出力してください。
   </p>
 </div>
 
@@ -766,7 +766,7 @@ function capturePoint() {
     elevation: Math.round(elevation * 10) / 10,
     windSpeed: Math.round(windSpeedKt * 10) / 10,
     windSpeedMs: Math.round(windSpeedMs * 10) / 10,
-    windDirection: Math.round(windDirection * 10) / 10,
+    windDirection: (Math.round(windDirection * 10) / 10) % 360,
     dx, dy,
     balloonX, balloonY
   });
@@ -1014,7 +1014,7 @@ window.getHaloMeasurement = function() {
 
   return {
     observedAt: observedAt.toISOString(),
-    layers: records.map(record => ({
+    layers: records.filter(record => record.windSpeedMs > 0).map(record => ({
       lowerAltitude: record.lowerAltitude,
       upperAltitude: record.upperAltitude,
       direction: record.windDirection,
@@ -1053,7 +1053,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   button.addEventListener('click', () => integration.sendMeasurement());
   integration.start();
-  window.addEventListener('pagehide', () => integration.destroy(), { once: true });
+  window.addEventListener('pagehide', () => integration.destroy());
+  window.addEventListener('pageshow', () => integration.start());
 </script>
 </body>
 </html>

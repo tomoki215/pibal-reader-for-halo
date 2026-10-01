@@ -1,21 +1,34 @@
 import {
   capabilitiesMessage, HALO_READY, MEASUREMENT_ACCEPTED, MEASUREMENT_COMPLETED,
-  MEASUREMENT_REJECTED, PROTOCOL_VERSION
+  PIBAL_REQUEST, PROTOCOL_VERSION
 } from './halo-message-types.js';
 import { embeddingOrigin, isHaloMessage, normalizeAllowedOrigins, requestedHaloOrigin } from './halo-message-validator.js';
 
-const standaloneMessage = 'HALOへの反映は、HALOの風データ編集画面から開いた場合に利用できます。単独利用時はCSVを出力してください。';
+const standaloneMessage = 'HALOへの反映は、HALOの風情報画面の「追加」から開いた場合に利用できます。単独利用時はCSVを出力してください。';
 
-export function createHaloIntegration({ window, document, allowedOrigins, trustEmbeddingOrigin = false, getMeasurement, onStateChange = () => {} }) {
+export function createHaloIntegration({ window, document, allowedOrigins, trustEmbeddingOrigin = false,
+  getMeasurement, onStateChange = () => {}, acknowledgementTimeoutMs = 10000 }) {
   const origins = normalizeAllowedOrigins(allowedOrigins);
+  const parentOrigin = embeddingOrigin(document);
+  // 許可リストがある配信では、埋め込み元の信頼によって制限を迂回させない。
   const haloOrigin = requestedHaloOrigin(window.location, origins) ||
-    (trustEmbeddingOrigin ? embeddingOrigin(document) : null);
+    (origins.has(parentOrigin) || (allowedOrigins.length === 0 && trustEmbeddingOrigin) ? parentOrigin : null);
   const embedded = window.parent !== window;
+  let started = false;
   let ready = false;
   let pendingMeasurementId = null;
+  let acknowledgementTimer = null;
 
-  const emit = (extra = {}) => onStateChange({ canSend: embedded && Boolean(haloOrigin) && ready, ...extra });
+  const emit = (extra = {}) => onStateChange({
+    canSend: started && embedded && Boolean(haloOrigin) && ready && pendingMeasurementId === null,
+    ...extra
+  });
   const post = data => window.parent.postMessage(data, haloOrigin);
+  const clearPending = () => {
+    if (acknowledgementTimer !== null) window.clearTimeout(acknowledgementTimer);
+    acknowledgementTimer = null;
+    pendingMeasurementId = null;
+  };
 
   function handleMessage(event) {
     if (!embedded || !haloOrigin || event.origin !== haloOrigin || event.source !== window.parent || !isHaloMessage(event.data)) return;
@@ -23,38 +36,55 @@ export function createHaloIntegration({ window, document, allowedOrigins, trustE
       ready = true;
       post(capabilitiesMessage());
       emit({ message: 'HALOとの接続を確認しました。観測完了後に結果を反映できます。' });
-    } else if (event.data.measurementId === pendingMeasurementId && event.data.type === MEASUREMENT_ACCEPTED) {
-      pendingMeasurementId = null;
-      emit({ status: { text: 'HALOへ送信しました。HALO側で内容を確認してください。', type: 'ok' } });
-    } else if (event.data.measurementId === pendingMeasurementId && event.data.type === MEASUREMENT_REJECTED) {
-      pendingMeasurementId = null;
-      emit({ status: { text: 'HALOが観測結果を拒否しました。CSV出力をご利用ください。', type: 'err' } });
+    } else if (pendingMeasurementId !== null && event.data.measurementId === pendingMeasurementId) {
+      clearPending();
+      const accepted = event.data.type === MEASUREMENT_ACCEPTED;
+      emit({ status: {
+        text: accepted ? 'HALOへ送信しました。追加画面で内容を確認し、「OK」で保存してください。' :
+          'HALOが観測結果を受け取れませんでした。内容を確認するかCSV出力をご利用ください。',
+        type: accepted ? 'ok' : 'err'
+      } });
     }
   }
 
   return {
     start() {
+      if (started) return;
+      started = true;
       window.addEventListener('message', handleMessage);
       if (!embedded) emit({ message: standaloneMessage });
-      else if (!haloOrigin) emit({ message: '許可されていないHALO originです。CSV出力をご利用ください。' });
-      else emit({ message: 'HALOからの接続確認を待っています。' });
+      else if (!haloOrigin) emit({ message: 'HALOとの接続を確認できません。HALOの「追加」から開き直すか、CSVを出力してください。' });
+      else {
+        emit({ message: 'HALOとの接続を確認しています。' });
+        // iframe の load 通知より遅く初期化された場合も接続する。
+        post({ source: 'pibal-reader', type: PIBAL_REQUEST, protocolVersion: PROTOCOL_VERSION });
+      }
     },
     sendMeasurement() {
-      if (!embedded || !haloOrigin || !ready) return false;
+      if (!started || !embedded || !haloOrigin || !ready || pendingMeasurementId !== null) return false;
       const measurement = getMeasurement();
       if (!measurement.layers.length) {
         emit({ status: { text: '送信する観測データがありません。', type: 'warn' } });
         return false;
       }
       pendingMeasurementId = window.crypto.randomUUID();
+      acknowledgementTimer = window.setTimeout(() => {
+        clearPending();
+        emit({ status: { text: 'HALOから応答がありません。接続を確認して再度反映するか、CSVを出力してください。', type: 'err' } });
+      }, acknowledgementTimeoutMs);
+      emit({ status: { text: 'HALOへ送信中…', type: 'info' } });
       post({
         source: 'pibal-reader', type: MEASUREMENT_COMPLETED, protocolVersion: PROTOCOL_VERSION,
         measurementId: pendingMeasurementId, observedAt: measurement.observedAt,
         directionConvention: 'from', altitudeUnit: 'm', speedUnit: 'm/s', layers: measurement.layers
       });
-      emit({ status: { text: 'HALOへ送信中…', type: 'info' } });
       return true;
     },
-    destroy() { window.removeEventListener('message', handleMessage); }
+    destroy() {
+      window.removeEventListener('message', handleMessage);
+      clearPending();
+      ready = false;
+      started = false;
+    }
   };
 }
