@@ -39,7 +39,7 @@ The rest of HALO's integration remains required:
 
 1. Allow the reader origin in HALO's `frame-src` CSP.
 2. After the iframe loads, send `pibal.integration.ready` to the exact reader origin, never `"*"`.
-3. Accept messages only when `event.origin` is the reader origin and `event.source` is the active iframe's `contentWindow`.
+3. Accept messages only when `event.origin` is the reader origin and `event.source` is the active iframe's `contentWindow`. Compare those window references with JavaScript strict equality: in Dart JS interop use `event.source?.strictEquals(iframe.contentWindow).toDart == true`. Dart's general `==` dispatch may read properties on the cross-origin WindowProxy and throw a browser security exception.
 4. Validate the complete measurement payload and reject duplicate `measurementId` values before populating the edit form.
 5. Return the accepted/rejected acknowledgement to the exact reader origin, and require the user to review and save rather than saving automatically.
 
@@ -106,7 +106,9 @@ HALO returns one of these messages with the matching ID:
 
 Acknowledgement means that HALO accepted or rejected the transfer; it does not mean the edit form was saved. Duplicate IDs must never be applied twice. HALO consumes at most one result per open observation screen, including during its closing transition.
 
-While awaiting an acknowledgement, the reader disables transfer and refuses a second send. After rejection or a 10-second timeout it shows a recovery message and permits retry; unrelated or mismatched acknowledgements are ignored. Destruction cancels pending timers. A success message instructs the user to review the HALO edit form and save using **OK**.
+While awaiting an acknowledgement, the reader disables transfer and refuses a second send. After rejection or a 10-second timeout it shows a recovery message and permits retry; unrelated or mismatched acknowledgements are ignored. Destruction cancels pending timers. A success message instructs the user to review the HALO edit form and save using **OK**. Sending, empty-observation warnings, and failure messages appear directly below the transfer button, including when the observation table pushes the top status area out of view.
+
+Use `crypto.randomUUID()` where available. In other browser contexts, generate an RFC 4122 UUID v4 with `crypto.getRandomValues()`; never use `Math.random()`. If cryptographic randomness or observation serialization fails, show a visible error, clear the pending transfer, and permit retry or CSV export. HTTP localhost is generally a trustworthy context and does not by itself imply that `randomUUID` is unavailable.
 
 ## Compatibility checklist
 
