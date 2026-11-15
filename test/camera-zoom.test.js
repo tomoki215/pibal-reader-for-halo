@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_TOTAL_ZOOM, clampZoom, splitZoom, createPinchTracker } from '../src/camera/zoom.js';
+import { MAX_TOTAL_ZOOM, BUTTON_ZOOM_STEP, clampZoom, splitZoom, stepZoom, createPinchTracker } from '../src/camera/zoom.js';
 
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `expected ${expected}, got ${actual}`);
 
@@ -9,6 +9,25 @@ test('clampZoom keeps the factor within 1 and the total maximum', () => {
   assert.equal(clampZoom(5), 5);
   assert.equal(clampZoom(1000), MAX_TOTAL_ZOOM);
   assert.equal(clampZoom(NaN), 1);
+});
+
+test('the maximum zoom is 400x', () => {
+  assert.equal(MAX_TOTAL_ZOOM, 400);
+  assert.equal(clampZoom(1000), 400);
+});
+
+test('stepZoom multiplies or divides by the button step and stays within range', () => {
+  near(stepZoom(2, 1), 2 * BUTTON_ZOOM_STEP);
+  near(stepZoom(3, -1), 3 / BUTTON_ZOOM_STEP);
+  assert.equal(stepZoom(1, -1), 1);
+  assert.equal(stepZoom(399, 1), 400);
+  assert.equal(stepZoom(400, 1), 400);
+});
+
+test('stepping from 1x reaches the maximum in a reasonable number of presses', () => {
+  let zoom = 1, presses = 0;
+  while (zoom < MAX_TOTAL_ZOOM) { zoom = stepZoom(zoom, 1); presses++; }
+  assert.ok(presses <= 16, `presses: ${presses}`);
 });
 
 test('without hardware zoom everything is digital', () => {

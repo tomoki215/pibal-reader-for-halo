@@ -148,6 +148,37 @@
     font-size: 12px;
     pointer-events: none;
   }
+  .zoom-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .zoom-btn {
+    width: 56px; height: 44px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface2);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .zoom-btn:active { background: var(--border); }
+  .zoom-btn:disabled { opacity: 0.35; cursor: default; }
+  .zoom-label {
+    min-width: 72px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--text-dim);
+  }
   .crosshair {
     position: absolute;
     inset: 0;
@@ -506,6 +537,11 @@
       <div class="crosshair" aria-hidden="true"><div class="ring"></div></div>
       <div class="zoom-badge" id="zoomBadge" aria-live="off">1.0×</div>
     </div>
+    <div id="zoomControls" class="zoom-controls hidden">
+      <button type="button" class="zoom-btn" id="zoomOut" aria-label="縮小" data-zoom-dir="-1">−</button>
+      <span class="zoom-label" id="zoomLabel">1.0×</span>
+      <button type="button" class="zoom-btn" id="zoomIn" aria-label="拡大" data-zoom-dir="1">＋</button>
+    </div>
     <div class="sensor-grid">
       <div class="sensor-item">
         <div class="label">方位</div>
@@ -674,6 +710,7 @@ function startCamera() {
     const video = document.getElementById('cameraVideo');
     video.srcObject = stream;
     document.getElementById('cameraView').classList.remove('hidden');
+    document.getElementById('zoomControls').classList.remove('hidden');
     setupZoom(stream);
     return video.play().catch(() => {});
   }).catch(() => fallbackManual('カメラが許可されませんでした - 手入力に切替'));
@@ -704,12 +741,42 @@ function setupZoom(stream) {
     for (const type of ['pointerup', 'pointercancel']) {
       view.addEventListener(type, ev => pinchTracker.up(ev.pointerId));
     }
+    bindZoomButtons();
     // iOS Safari のページ全体のピンチ拡大を止める
     for (const type of ['gesturestart', 'gesturechange']) {
       view.addEventListener(type, ev => ev.preventDefault());
     }
   }
   applyZoom();
+}
+
+// +/- ボタン。押し続けると連続して拡大・縮小する。
+function bindZoomButtons() {
+  const REPEAT_DELAY_MS = 400;
+  const REPEAT_INTERVAL_MS = 150;
+  let holdTimer = null;
+  let repeatTimer = null;
+
+  const stop = () => {
+    clearTimeout(holdTimer);
+    clearInterval(repeatTimer);
+    holdTimer = repeatTimer = null;
+  };
+
+  for (const button of document.querySelectorAll('[data-zoom-dir]')) {
+    const direction = Number(button.dataset.zoomDir);
+    const step = () => setZoom(window.PibalZoom.stepZoom(zoomFactor, direction));
+    button.addEventListener('pointerdown', ev => {
+      ev.preventDefault();
+      stop();
+      step();
+      holdTimer = setTimeout(() => { repeatTimer = setInterval(step, REPEAT_INTERVAL_MS); }, REPEAT_DELAY_MS);
+    });
+    for (const type of ['pointerup', 'pointerleave', 'pointercancel']) {
+      button.addEventListener(type, stop);
+    }
+    button.addEventListener('contextmenu', ev => ev.preventDefault());
+  }
 }
 
 function setZoom(value) {
@@ -721,7 +788,11 @@ function applyZoom() {
   if (!window.PibalZoom) return;
   const { hardware, digitalScale } = window.PibalZoom.splitZoom(zoomFactor, zoomCaps);
   document.getElementById('cameraVideo').style.transform = `scale(${digitalScale})`;
-  document.getElementById('zoomBadge').textContent = zoomFactor.toFixed(1) + '×';
+  const label = (zoomFactor < 10 ? zoomFactor.toFixed(1) : Math.round(zoomFactor)) + '×';
+  document.getElementById('zoomBadge').textContent = label;
+  document.getElementById('zoomLabel').textContent = label;
+  document.getElementById('zoomOut').disabled = zoomFactor <= 1;
+  document.getElementById('zoomIn').disabled = zoomFactor >= window.PibalZoom.MAX_TOTAL_ZOOM;
   if (hardware === null || !cameraStream) return;
 
   // applyConstraints は非同期のため、処理中は最新の値だけを後で反映する
@@ -746,6 +817,8 @@ function stopCamera() {
   if (video) video.srcObject = null;
   const view = document.getElementById('cameraView');
   if (view) view.classList.add('hidden');
+  const controls = document.getElementById('zoomControls');
+  if (controls) controls.classList.add('hidden');
 }
 
 function initSensors() {
@@ -1199,11 +1272,11 @@ window.addEventListener('DOMContentLoaded', () => {
 <script type="module">
   import { createHaloIntegration } from './src/integrations/halo/halo-post-message.js';
   import { createPointingTracker } from './src/orientation/camera-pointing.js';
-  import { clampZoom, splitZoom, createPinchTracker } from './src/camera/zoom.js';
+  import { MAX_TOTAL_ZOOM, clampZoom, splitZoom, stepZoom, createPinchTracker } from './src/camera/zoom.js';
 
   // 通常スクリプトの観測処理から利用する（イベント受信時に参照するため読み込み順の影響を受けない）
   window.PibalCameraPointing = { createPointingTracker };
-  window.PibalZoom = { clampZoom, splitZoom, createPinchTracker };
+  window.PibalZoom = { MAX_TOTAL_ZOOM, clampZoom, splitZoom, stepZoom, createPinchTracker };
 
   const button = document.getElementById('sendToHalo');
   const help = document.getElementById('haloHelp');

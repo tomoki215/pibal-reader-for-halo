@@ -3,11 +3,20 @@
 // 超える分や非対応端末（iOS Safari など）ではデジタルズーム（CSS 拡大）で補う。
 
 // 画質が落ちても可能な限り拡大できるようにする、合計倍率の上限。
-export const MAX_TOTAL_ZOOM = 100;
+export const MAX_TOTAL_ZOOM = 400;
+
+// +/- ボタン 1 回あたりの倍率の変化（等比）。1→400 倍を約 15 回で往復できる。
+export const BUTTON_ZOOM_STEP = 1.5;
 
 export function clampZoom(zoom, max = MAX_TOTAL_ZOOM) {
   if (!Number.isFinite(zoom)) return 1;
   return Math.min(max, Math.max(1, zoom));
+}
+
+// ボタン操作: direction が正なら拡大、負なら縮小した倍率を返す。
+export function stepZoom(zoom, direction, step = BUTTON_ZOOM_STEP) {
+  const current = clampZoom(zoom);
+  return clampZoom(direction >= 0 ? current * step : current / step);
 }
 
 // 表示倍率（1 が等倍）を、ハードウェアズーム値とデジタル拡大率へ分ける。

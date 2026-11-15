@@ -64,7 +64,9 @@ test('transfer feedback is visible beside the button rather than only at the top
       return { start() {}, destroy() {}, sendMeasurement() {} };
     },
     createPointingTracker: () => ({ update() { return null; } }),
+    MAX_TOTAL_ZOOM: 400,
     clampZoom: value => value,
+    stepZoom: value => value,
     splitZoom: () => ({ hardware: null, digitalScale: 1 }),
     createPinchTracker: () => ({}),
     setStatus() {}
