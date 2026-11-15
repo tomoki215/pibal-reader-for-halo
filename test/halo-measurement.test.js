@@ -52,7 +52,7 @@ test('calm and unavailable layers are omitted rather than fabricated', () => {
 
 test('transfer feedback is visible beside the button rather than only at the top of a long observation page', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const source = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import[^;]+;/m, '');
+  const source = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import[^;]+;/gm, '');
   const button = { disabled: true, addEventListener() {} };
   const help = { textContent: '' };
   let updateState;
@@ -63,6 +63,7 @@ test('transfer feedback is visible beside the button rather than only at the top
       updateState = options.onStateChange;
       return { start() {}, destroy() {}, sendMeasurement() {} };
     },
+    createPointingTracker: () => ({ update() { return null; } }),
     setStatus() {}
   };
   vm.runInNewContext(source, context);

@@ -117,6 +117,44 @@
     padding: 16px;
     margin-bottom: 16px;
   }
+  /* Camera view */
+  .camera-view {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    max-height: 55vh;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #000;
+  }
+  .camera-view video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .crosshair {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .crosshair::before, .crosshair::after {
+    content: '';
+    position: absolute;
+    background: rgba(56, 189, 248, 0.85);
+  }
+  .crosshair::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+  .crosshair::after { top: 50%; left: 0; right: 0; height: 1px; }
+  .crosshair .ring {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 48px; height: 48px;
+    transform: translate(-50%, -50%);
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    background: rgba(10, 14, 26, 0.0);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  }
   .sensor-grid {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
@@ -410,9 +448,9 @@
   <div class="perm-card">
     <h2>Pi-Bal Tracker</h2>
     <p>パイロットバルーンの風向風速観測アプリです。<br>
-    スマホの上端をバルーンに向けて方位・仰角を取得します。<br><br>
-    センサーへのアクセス許可が必要です。</p>
-    <button class="btn btn-perm" onclick="requestPermission()">センサーを許可する</button>
+    背面カメラの映像の中心（十字線）にバルーンを合わせ続けて、方位・仰角を取得します。<br><br>
+    センサーとカメラへのアクセス許可が必要です。</p>
+    <button class="btn btn-perm" onclick="requestPermission()">センサー・カメラを許可する</button>
     <button class="btn btn-reset" onclick="skipPermission()">手入力モードで使う</button>
   </div>
 </div>
@@ -448,6 +486,10 @@
 
   <!-- Sensor Display -->
   <div class="sensor-panel">
+    <div id="cameraView" class="camera-view hidden">
+      <video id="cameraVideo" autoplay playsinline muted></video>
+      <div class="crosshair" aria-hidden="true"><div class="ring"></div></div>
+    </div>
     <div class="sensor-grid">
       <div class="sensor-item">
         <div class="label">方位</div>
@@ -555,12 +597,18 @@ let cumulX = 0, cumulY = 0;
 let positions = [{x: 0, y: 0}]; // starting point = observer
 
 // ===== Permission & Sensor =====
+let cameraStream = null;
+let cameraWanted = false;
+let headingIsAbsolute = true;
+let pointingTracker = null; // src/orientation/camera-pointing.js（module）から遅延取得
+
 function requestPermission() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
     // iOS 13+
     DeviceOrientationEvent.requestPermission().then(state => {
       if (state === 'granted') {
         initSensors();
+        startCamera();
       } else {
         fallbackManual('センサー許可が拒否されました');
       }
@@ -568,6 +616,7 @@ function requestPermission() {
   } else if ('DeviceOrientationEvent' in window) {
     // Android / other
     initSensors();
+    startCamera();
   } else {
     fallbackManual('このデバイスではセンサーが利用できません');
   }
@@ -581,13 +630,47 @@ function skipPermission() {
 
 function fallbackManual(msg) {
   manualMode = true;
+  stopCamera();
   document.getElementById('manualInput').classList.remove('hidden');
   setStatus(msg, 'warn');
 }
 
+// 背面カメラの映像を表示する。光軸（画面中央の十字線）が計測する方向になる。
+function startCamera() {
+  cameraWanted = true;
+  if (cameraStream) return Promise.resolve();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    fallbackManual('カメラを利用できません - 手入力に切替');
+    return Promise.resolve();
+  }
+  return navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false
+  }).then(stream => {
+    if (!cameraWanted) { stream.getTracks().forEach(t => t.stop()); return; }
+    cameraStream = stream;
+    const video = document.getElementById('cameraVideo');
+    video.srcObject = stream;
+    document.getElementById('cameraView').classList.remove('hidden');
+    return video.play().catch(() => {});
+  }).catch(() => fallbackManual('カメラが許可されませんでした - 手入力に切替'));
+}
+
+function stopCamera() {
+  cameraWanted = false;
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  const video = document.getElementById('cameraVideo');
+  if (video) video.srcObject = null;
+  const view = document.getElementById('cameraView');
+  if (view) view.classList.add('hidden');
+}
+
 function initSensors() {
   window.addEventListener('deviceorientation', handleOrientation, true);
-  // Also try absolute orientation
+  // 方位が絶対値で得られる端末（Android）ではこちらを優先する
   window.addEventListener('deviceorientationabsolute', handleOrientation, true);
   sensorAvailable = true;
   setStatus('センサー接続OK', 'ok');
@@ -600,40 +683,39 @@ function initSensors() {
   }, 3000);
 }
 
+// 背面カメラの光軸が指す方位・仰角を取得する（計算は camera-pointing.js）。
 function handleOrientation(e) {
-  let heading = null;
-
-  if (e.webkitCompassHeading !== undefined) {
-    // iOS: webkitCompassHeading is degrees from north
-    heading = e.webkitCompassHeading;
-  } else if (e.alpha !== null) {
-    // Android: alpha is 0-360, but relative. If absolute event, it's compass heading
-    if (e.absolute) {
-      heading = (360 - e.alpha) % 360;
-    } else {
-      heading = (360 - e.alpha) % 360;
-    }
+  if (!pointingTracker && window.PibalCameraPointing) {
+    pointingTracker = window.PibalCameraPointing.createPointingTracker();
   }
+  if (!pointingTracker) return;
 
-  // Elevation: beta is tilt front-back
-  // beta=0° (flat on table, top edge horizontal) → elevation 0°
-  // beta=90° (upright, top edge pointing up) → elevation 90°
-  let elevation = null;
-  if (e.beta !== null) {
-    elevation = Math.max(0, Math.min(90, e.beta));
-  }
+  const pointing = pointingTracker.update({
+    type: e.type,
+    absolute: e.absolute,
+    alpha: e.alpha,
+    beta: e.beta,
+    gamma: e.gamma,
+    webkitCompassHeading: e.webkitCompassHeading,
+    webkitCompassAccuracy: e.webkitCompassAccuracy
+  });
+  if (!pointing) return;
 
-  if (heading !== null) {
-    currentHeading = Math.round(heading * 10) / 10;
-    document.getElementById('headingVal').textContent = currentHeading.toFixed(1);
-    if (!sensorAvailable) {
-      sensorAvailable = true;
-      setStatus('センサー接続OK', 'ok');
-    }
+  // 風船は水平線より上にあるため、仰角は 0〜90 度に制限する
+  const elevation = Math.max(0, Math.min(90, pointing.elevation));
+
+  currentHeading = Math.round(pointing.heading * 10) / 10;
+  document.getElementById('headingVal').textContent = currentHeading.toFixed(1);
+  currentElevation = Math.round(elevation * 10) / 10;
+  document.getElementById('elevVal').textContent = currentElevation.toFixed(1);
+
+  if (!sensorAvailable) {
+    sensorAvailable = true;
+    setStatus('センサー接続OK', 'ok');
   }
-  if (elevation !== null) {
-    currentElevation = Math.round(elevation * 10) / 10;
-    document.getElementById('elevVal').textContent = currentElevation.toFixed(1);
+  if (!pointing.absolute && headingIsAbsolute) {
+    headingIsAbsolute = false;
+    setStatus('この端末は絶対方位を取得できないため、方位が不正確な可能性があります', 'warn');
   }
 }
 
@@ -662,7 +744,7 @@ function startRecording() {
   document.getElementById('btnRecord').disabled = true;
   document.getElementById('btnStop').classList.remove('hidden');
 
-  setStatus('自動記録中 — バルーンにスマホ上端を向け続けてください', 'ok');
+  setStatus('自動記録中 — 画面中央の十字線にバルーンを合わせ続けてください', 'ok');
   startAutoCapture(intervalSec);
 }
 
@@ -1036,6 +1118,10 @@ window.addEventListener('DOMContentLoaded', () => {
 <script src="./halo-config.js"></script>
 <script type="module">
   import { createHaloIntegration } from './src/integrations/halo/halo-post-message.js';
+  import { createPointingTracker } from './src/orientation/camera-pointing.js';
+
+  // 通常スクリプトの観測処理から利用する（イベント受信時に参照するため読み込み順の影響を受けない）
+  window.PibalCameraPointing = { createPointingTracker };
 
   const button = document.getElementById('sendToHalo');
   const help = document.getElementById('haloHelp');
@@ -1056,8 +1142,17 @@ window.addEventListener('DOMContentLoaded', () => {
 
   button.addEventListener('click', () => integration.sendMeasurement());
   integration.start();
-  window.addEventListener('pagehide', () => integration.destroy());
-  window.addEventListener('pageshow', () => integration.start());
+  window.addEventListener('pagehide', () => {
+    integration.destroy();
+    // 戻る操作でキャッシュされる間もカメラを占有しない
+    const resume = cameraWanted;
+    stopCamera();
+    cameraWanted = resume;
+  });
+  window.addEventListener('pageshow', () => {
+    integration.start();
+    if (cameraWanted && !manualMode) startCamera();
+  });
 </script>
 </body>
 </html>

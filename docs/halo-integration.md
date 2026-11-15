@@ -29,7 +29,7 @@ HALO does not need to publish its origin in the iframe URL when this mode is ena
 <iframe
   src="https://tomoki215.github.io/pibal-reader-for-halo/"
   referrerpolicy="origin"
-  allow="geolocation; accelerometer; gyroscope; magnetometer"
+  allow="geolocation; camera; accelerometer; gyroscope; magnetometer"
 ></iframe>
 ```
 
@@ -49,7 +49,7 @@ HALO must allow only the Pages origin in CSP:
 frame-src 'self' https://tomoki215.github.io;
 ```
 
-The iframe should retain the permissions needed by the existing observation flow (including geolocation, accelerometer, gyroscope, magnetometer, and downloads). HALO's application URL is `https://tomoki215.github.io/pibal-reader-for-halo/` and the source URL is `https://github.com/tomoki215/pibal-reader-for-halo`.
+The iframe should retain the permissions needed by the existing observation flow (including geolocation, camera, accelerometer, gyroscope, magnetometer, and downloads). HALO's application URL is `https://tomoki215.github.io/pibal-reader-for-halo/` and the source URL is `https://github.com/tomoki215/pibal-reader-for-halo`.
 
 ## Handshake
 
